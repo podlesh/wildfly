@@ -115,6 +115,8 @@ public class CoarseSessionFactory<L> implements SessionFactory<CoarseSessionEntr
         return new CoarseSessionEntry<>(sessionEntry, attributesEntry);
     }
 
+    private static final ThreadLocal<String> RECURSION_CHECK = new ThreadLocal<>();
+
     @Override
     public CoarseSessionEntry<L> findValue(String id) {
         CoarseSessionCacheEntry<L> entry = this.sessionCache.get(id);
@@ -127,8 +129,17 @@ public class CoarseSessionFactory<L> implements SessionFactory<CoarseSessionEntr
                     Map<String, Object> attributes = this.marshaller.read(value);
                     return new CoarseSessionEntry<>(sessionEntry, new MutableCacheEntry<>(attributes, new CacheEntryMutator<>(this.attributesCache, key, value)));
                 } catch (InvalidSerializedFormException e) {
+                    if (id.equals(RECURSION_CHECK.get())) {
+                        //WildFly 9.0.2 bug: infinite recursion
+                        return null;
+                    }
                     InfinispanWebLogger.ROOT_LOGGER.failedToActivateSession(e, id);
-                    this.remove(id);
+                    try {
+                        RECURSION_CHECK.set(id);
+                        this.remove(id);
+                    } finally {
+                        RECURSION_CHECK.remove();
+                    }
                 }
             }
         }
